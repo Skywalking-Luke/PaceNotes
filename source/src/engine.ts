@@ -1,5 +1,6 @@
 // LH Cars Arcade shared engine: top-down pixel racer core, UI, audio, leaderboard, ads hooks.
 import "./style.css";
+import { MP } from "./mp";
 export const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 export const params = new URLSearchParams(location.search);
 export const OG = params.has("og");
@@ -94,6 +95,7 @@ export interface Game {
   under?(pY: number, sx: number): void; overlay?(pY: number, sx: number): void;
   drawObs?(o: Obs, x: number, y: number): void;
   pads: Pad[]; keyDown?(k: string): void;
+  mpTarget?: number;
   overLines(): [string, number | string][];
   boardVal?(): number;
   og(): void; ogSub: string;
@@ -102,7 +104,7 @@ export interface Game {
 
 // ---------- shared state ----------
 export const G = {
-  st: "title" as "title" | "play" | "pause" | "clear" | "over" | "board",
+  st: "title" as "title" | "play" | "pause" | "clear" | "over" | "board" | "mp",
   level: 1, pS: 0, px: 0, camX: 0, v: 0, vxL: 0, score: 0, runT: 0, t: 0, levelStart: 0, levelLen: 1,
   combo: 0, comboT: 0, mult: 1, bots: [] as Bot[], picks: [] as Pick[], obs: [] as Obs[], parts: [] as Part[],
   fx: {} as Record<string, number>, shield: false, invT: 0, air: 0, airMax: 0, off: 0, lat: 0, edge: 40,
@@ -223,8 +225,8 @@ export function showTitle() {
   menu().innerHTML = `<div class="card"><h2>LH CARS ARCADE</h2><h1 style="text-shadow:4px 4px 0 ${game.shadow};color:${game.color}">${game.title}</h1>
   <p>${game.blurb}</p><p>${game.controls}</p>${legendHtml()}${game.legend || ""}
   <canvas id="roster" width="${12 + game.roster.length * 14}" height="22"></canvas>
-  <button id="go">START</button><button class="alt" id="lb">LEADERBOARD</button><button class="alt" id="hm">ARCADE</button></div>`;
-  $("go").onclick = () => newRun(); $("lb").onclick = () => showBoard(); $("hm").onclick = () => (location.href = "/");
+  <button id="go">START</button><button class="alt" id="mpb">MULTIPLAYER</button><button class="alt" id="lb">LEADERBOARD</button><button class="alt" id="hm">ARCADE</button></div>`;
+  $("go").onclick = () => newRun(); $("mpb").onclick = () => MP.open(); $("lb").onclick = () => showBoard(); $("hm").onclick = () => (location.href = "/");
   const rc = $<HTMLCanvasElement>("roster"), rg = rc.getContext("2d")!; rg.imageSmoothingEnabled = false;
   rc.style.width = rc.width * 2 + "px"; rc.style.height = "44px";
   rg.drawImage(game.player.cv, 0, 1); game.roster.forEach((b, i) => rg.drawImage(b.cv, 16 + i * 14, 1));
@@ -256,6 +258,7 @@ function continueRun() {
 }
 export function gameOver(why: string) {
   if (G.st !== "play") return;
+  if (MP.inRace) { G.st = "over"; G.overWhy = why; G.crashT = 0; audio.crash(); showPlay(false); speechSynthesis?.cancel?.(); MP.finish("out"); return; }
   G.st = "over"; G.overWhy = why; G.crashT = 0; audio.crash(); showPlay(false); speechSynthesis?.cancel?.();
   setTimeout(() => {
     menu().classList.remove("off");
@@ -280,6 +283,7 @@ export function gameOver(why: string) {
   }, 900);
 }
 function pause(on: boolean) {
+  if (MP.racing) return; // no pausing in a live multiplayer race
   if (on && G.st === "play") {
     G.st = "pause"; audio.idle(); menu().classList.remove("off");
     menu().innerHTML = `<div class="card"><h2>PAUSED</h2><button id="rs">RESUME</button><button class="alt" id="rt">RETRY</button><button class="alt" id="qt">QUIT</button></div>`;
@@ -293,6 +297,7 @@ export function newRun() {
   startLevel(); G.st = "play"; menu().classList.add("off"); showPlay(true); audio.start();
 }
 function startLevel() {
+  if (MP.racing) MP.rngSeed(G.level);
   G.levelStart = G.pS; G.levelLen = game.levelLen(G.level); G.bots = []; G.picks = []; G.obs = []; G.objs = []; G.lvStat = {};
   game.startLevel();
 }
@@ -302,6 +307,7 @@ function finishLevel() {
   if (r.fail) { audio.fail(); gameOver(r.fail); return; }
   const lb = 1000 * G.level + r.bonus; G.score += lb; G.br.clear = (G.br.clear || 0) + lb;
   const got = G.objs.filter((o) => o.done).length;
+  if (MP.inRace && G.level >= MP.target) { G.st = "mp"; audio.jingle(); showPlay(false); showBanner("FINISHED!", `${Math.floor(G.score)} PTS · ${fmtT(G.runT)}`, 2500); MP.finish("fin"); return; }
   G.st = "clear"; clearT = 2.2; audio.jingle();
   showBanner(`${game.unit} ${G.level} CLEAR`, `+${lb} · objectives ${got}/${G.objs.length}${r.msg ? " · " + r.msg : ""}`, 2200);
 }
@@ -466,6 +472,7 @@ export function render() {
   for (const o of G.obs) { if (o.hit) continue; const y = pY - (o.s - G.pS); if (y < -20 || y > H + 20) continue; game.drawObs?.(o, Math.round(game.center(o.s) + o.off * game.width(o.s) / 2 + shiftX), Math.round(y)); }
   for (const p of G.picks) { if (p.got) continue; const y = pY - (p.s - G.pS); if (y < -10 || y > H + 10) continue; drawPick(p, Math.round(game.center(p.s) + p.off * game.width(p.s) / 2 + shiftX), Math.round(y)); }
   for (const b of G.bots) { if (b.dead) continue; const y = pY - (b.s - G.pS); if (y < -20 || y > H + 20) continue; drawCar(botX(b) + shiftX, y, b.spr, b.brake > 0, b.spin); if (b.wreck > 0 && Math.random() < 0.4) G.parts.push({ x: botX(b) + shiftX + rnd(-4, 4), y: y + rnd(-6, 6), vx: rnd(-10, 10), vy: rnd(-30, 0), life: 0.6, c: Math.random() < 0.5 ? "#888" : "#ccc" }); }
+  drawGhosts(pY, shiftX);
   const sx = G.px + shiftX;
   if (G.speedFx > 0) { ctx.fillStyle = game.color; for (let i = 0; i < 6; i++) ctx.fillRect(Math.round(sx - 8 + hash(i + Math.floor(performance.now() / 50)) * 16), pY + 10 + i * 3, 1, 6); }
   const sc = G.air > 0 ? 1 + 0.45 * Math.sin(Math.PI * (1 - G.air / Math.max(0.01, G.airMax))) : 1;
@@ -477,6 +484,20 @@ export function render() {
   if (G.flash > 0) { ctx.fillStyle = `rgba(255,255,255,${0.3 * G.flash / 0.25})`; ctx.fillRect(0, 0, W, H); }
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   if (G.st === "over") { ctx.fillStyle = `rgba(255,60,40,${Math.max(0, 0.5 - G.crashT)})`; ctx.fillRect(0, 0, W, H); }
+  MP.flushTags(cv);
+}
+function drawGhosts(pY: number, shiftX: number) {
+  for (const g of MP.ghosts()) {
+    let y = pY - (g.y - G.pS); const x = Math.round(clamp(g.x + shiftX, 6, W - 6));
+    const img = MP.tint(game.player.cv, g.col, game.id);
+    if (y < -12 || y > H + 12) { // off screen: edge marker
+      const up = y < 0; y = up ? 10 : H - 10; ctx.fillStyle = g.col;
+      for (let i = 0; i < 4; i++) ctx.fillRect(x - i, up ? y - 6 + i : y + 6 - i, 2 * i + 1, 1);
+      MP.tag(g, x, up ? y + 10 : y - 4); continue;
+    }
+    ctx.globalAlpha = g.st === "out" ? 0.3 : 0.62; ctx.drawImage(img, Math.round(x - SW / 2), Math.round(y - SH / 2)); ctx.globalAlpha = 1;
+    MP.tag(g, x, y - SH / 2 - 1);
+  }
 }
 export function pixelText(t: string, x: number, y: number, size: number, col: string, shadow: string) {
   const oc = document.createElement("canvas"); oc.width = W; oc.height = H; const o = oc.getContext("2d")!;
@@ -531,7 +552,7 @@ export function boot(gm: Game) {
     fetch(`${location.pathname}?fresh=${Date.now()}`, { cache: "no-store" }).then((r) => r.text()).then((html) => {
       const m = html.match(/assets\/index-[\w-]+\.js/); if (!m || mine.includes(m[0])) return;
       if (sessionStorage.getItem(gm.id + "-reloaded") === m[0]) return;
-      sessionStorage.setItem(gm.id + "-reloaded", m[0]); location.replace(`${location.pathname}?v=${m[0].slice(13, 21)}`);
+      sessionStorage.setItem(gm.id + "-reloaded", m[0]); const rm = params.get("room"); location.replace(`${location.pathname}?v=${m[0].slice(13, 21)}${rm ? "&room=" + encodeURIComponent(rm) : ""}`);
     }).catch(() => {});
   })();
   // input
@@ -542,8 +563,8 @@ export function boot(gm: Game) {
     if (k === "escape" || k === "p") { if (G.st === "play") pause(true); else if (G.st === "pause") pause(false); }
     if (k === "m") audio.toggle();
     if (k === "arrowdown" || k === "s") brakeKey = true;
-    if (k === "r" && G.st !== "title") newRun();
-    if (k === "enter" && (G.st === "title" || G.st === "board")) newRun();
+    if (k === "r" && G.st !== "title" && !MP.active) newRun();
+    if (k === "enter" && (G.st === "title" || G.st === "board") && !MP.active) newRun();
     if (!rep && G.st === "play") { for (const p of gm.pads) if (p.keys?.includes(k)) p.down(); gm.keyDown?.(k); }
   });
   addEventListener("keyup", (e) => { const k = e.key.toLowerCase(); keys.delete(k); if (k === "arrowdown" || k === "s") brakeKey = false; for (const p of gm.pads) if (p.keys?.includes(k)) p.up?.(); });
@@ -576,12 +597,21 @@ export function boot(gm: Game) {
     return;
   }
   showTitle();
+  MP.init({
+    id: gm.id, title: gm.title, color: gm.color, target: gm.mpTarget ?? 3, unit: gm.unit,
+    start: () => newRun(),
+    state: () => ({ p: G.pS, x: G.px, y: G.pS, a: G.yaw, sc: G.score, lv: G.level, tm: G.runT, v: G.v }),
+    quit: () => { G.st = "title"; showTitle(); },
+  });
   let last = performance.now();
   const frame = (now: number) => {
     const dt = Math.min(0.05, (now - last) / 1000); last = now;
     if (G.st === "title" || G.st === "board") { G.pS += 70 * dt; G.px = gm.center(G.pS); G.camX = G.px; }
+    MP.rngRun(() => {
     if (G.st === "clear") { clearT -= dt; G.pS += G.v * dt; G.camX += (gm.center(G.pS) - G.camX) * dt * 2; G.px += (gm.center(G.pS) - G.px) * dt * 3; if (clearT <= 0) { G.level++; startLevel(); G.st = "play"; } }
-    update(dt); render();
+    update(dt);
+    });
+    render();
     if (G.st === "play" || G.st === "clear" || G.st === "pause") updHud();
     requestAnimationFrame(frame);
   };
