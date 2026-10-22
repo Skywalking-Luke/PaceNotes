@@ -34,5 +34,27 @@
     <div id="app"></div>
     <script src="/ads.js" async></script>
     <script type="module" src="./src/main.ts"></script>
-  </body>
+  <!-- LH home button (title screen only) -->
+<style>#lhHome{position:fixed;z-index:2147483000;display:none;font:10px/1 "Press Start 2P",monospace;color:#fff;background:#120e34;border:3px solid #00e6ff;box-shadow:0 0 0 3px #0a081e,4px 4px 0 3px rgba(0,0,0,.6);padding:9px 10px;text-decoration:none;letter-spacing:1px;min-height:44px;min-width:44px;box-sizing:border-box;display:none;align-items:center;justify-content:center;image-rendering:pixelated}#lhHome:active{transform:translate(2px,2px)}</style>
+<script>
+(function(){
+  var a=document.createElement('a');a.id='lhHome';a.href='https://lhcars.my/';a.setAttribute('aria-label','LH Cars Arcade home');a.textContent='\u25C0 HOME';
+  function onTitle(){
+    var v=document.querySelector('.viewport[data-phase]');if(v)return v.getAttribute('data-phase')==='title';
+    var m=document.getElementById('menu');if(!m||m.classList.contains('off')||m.classList.contains('hidden')||!m.offsetParent&&getComputedStyle(m).position!=='fixed')return false;
+    var h=m.querySelector('.card h2');if(!h)return false;var t=h.textContent.trim();return t==='LH CARS ARCADE'||t==='LH CARS PRESENTS';
+  }
+  function boxes(){var r=[];document.querySelectorAll('button,a,input,[role=button],.pad,h1').forEach(function(e){if(e===a)return;var b=e.getBoundingClientRect();if(b.width&&b.height&&getComputedStyle(e).visibility!=='hidden')r.push(b);});return r;}
+  function place(){
+    var W=innerWidth,H=innerHeight,w=a.offsetWidth,h=a.offsetHeight,m=8,bx=boxes();
+    var c=[[(W-w)/2,m],[m,m],[W-w-m,m],[(W-w)/2,H-h-m],[m,H-h-m],[W-w-m,H-h-m],[m,(H-h)/2],[W-w-m,(H-h)/2]];
+    for(var i=0;i<c.length;i++){var x=c[i][0],y=c[i][1],ok=true;for(var j=0;j<bx.length;j++){var b=bx[j];if(x<b.right+4&&x+w>b.left-4&&y<b.bottom+4&&y+h>b.top-4){ok=false;break;}}if(ok){a.style.left=x+'px';a.style.top=y+'px';a.style.visibility='visible';return;}}
+    a.style.visibility='hidden';
+  }
+  function tick(){var on=onTitle();if(on){if(a.style.display!=='flex'){a.style.display='flex';}place();}else a.style.display='none';}
+  function init(){document.body.appendChild(a);tick();setInterval(tick,400);addEventListener('resize',tick);}
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init);else init();
+})();
+</script>
+</body>
 </html>
